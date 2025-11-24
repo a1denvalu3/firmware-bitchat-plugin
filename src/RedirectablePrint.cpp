@@ -40,7 +40,12 @@ size_t RedirectablePrint::write(uint8_t c)
     SEGGER_RTT_PutChar(SEGGER_STDOUT_CH, c);
 #endif
     // Account for legacy config transition
+#ifdef FORCE_SERIAL_ENABLED
+    // TODO: TEMPORARY DEBUG FIX - Remove this after serial config issue is resolved
+    bool serialEnabled = true; // Force serial always on for debugging
+#else
     bool serialEnabled = config.has_security ? config.security.serial_enabled : config.device.serial_enabled;
+#endif
     if (!config.has_lora || serialEnabled)
         dest->write(c);
 

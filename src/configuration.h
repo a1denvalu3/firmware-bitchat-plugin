@@ -126,6 +126,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // Feature toggles
 // -----------------------------------------------------------------------------
 
+// TODO: TEMPORARY DEBUG FIX - Remove this after serial config issue is resolved
+// Force serial console to always be enabled (for debugging)
+#define FORCE_SERIAL_ENABLED 1
+
 // Disable use of the NTP library and related features
 // #define DISABLE_NTP
 
@@ -412,6 +416,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define MESHTASTIC_EXCLUDE_POWERMON 1
 #define MESHTASTIC_EXCLUDE_I2C 1
 #define MESHTASTIC_EXCLUDE_PKI 1
+// Uncomment to exclude BitChat Bridge module
+// #define MESHTASTIC_EXCLUDE_BITCHAT_BRIDGE 1
 #define MESHTASTIC_EXCLUDE_POWER_FSM 1
 #define MESHTASTIC_EXCLUDE_TZ 1
 #endif

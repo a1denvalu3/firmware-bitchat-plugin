@@ -14,6 +14,7 @@ class NRF52Bluetooth : BluetoothApi
     bool isConnected();
     int getRssi();
     void sendLog(const uint8_t *logMessage, size_t length);
+    bool isCentralRoleSupported();
 
   private:
     static void onConnectionSecured(uint16_t conn_handle);

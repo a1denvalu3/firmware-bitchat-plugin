@@ -13,7 +13,6 @@ static BLECharacteristic fromNum = BLECharacteristic(BLEUuid(FROMNUM_UUID_16));
 static BLECharacteristic fromRadio = BLECharacteristic(BLEUuid(FROMRADIO_UUID_16));
 static BLECharacteristic toRadio = BLECharacteristic(BLEUuid(TORADIO_UUID_16));
 static BLECharacteristic logRadio = BLECharacteristic(BLEUuid(LOGRADIO_UUID_16));
-
 static BLEDis bledis; // DIS (Device Information Service) helper class instance
 static BLEBas blebas; // BAS (Battery Service) helper class instance
 #ifndef BLE_DFU_SECURE
@@ -104,10 +103,15 @@ void startAdv(void)
     // IncludeService UUID
     // Bluefruit.ScanResponse.addService(meshBleService);
     Bluefruit.ScanResponse.addTxPower();
+    
+    bool bitchatUuidAdded = Bluefruit.ScanResponse.addUuid(BLEUuid(BITCHAT_SERVICE_UUID_16));
+    LOG_INFO("Added BitChat UUID to scan response: %s", bitchatUuidAdded ? "SUCCESS" : "FAILED");
+    
     Bluefruit.ScanResponse.addName();
     // Include Name
     // Bluefruit.Advertising.addName();
     Bluefruit.Advertising.addService(meshBleService);
+    
     /* Start Advertising
      * - Enable auto advertising if disconnected
      * - Interval:  fast mode = 20 ms, slow mode = 152.5 ms
@@ -233,6 +237,13 @@ int NRF52Bluetooth::getRssi()
 {
     return 0; // FIXME figure out where to source this
 }
+
+bool NRF52Bluetooth::isCentralRoleSupported()
+{
+    // Central role disabled for BitChat - peripheral-only mode
+    return false;
+}
+
 void NRF52Bluetooth::setup()
 {
     // Initialise the Bluefruit module
