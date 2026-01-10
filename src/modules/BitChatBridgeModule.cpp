@@ -128,6 +128,13 @@ int32_t BitChatBridgeModule::runOnce()
                 LOG_INFO("BitChat Bridge: BLE peripheral service setup successful (nRF52)");
                 
                 bleServiceSetup = true;
+                
+                // Stop and restart advertising so iOS can discover the newly created service
+                LOG_INFO("BitChat Bridge: Stopping advertising...");
+                Bluefruit.Advertising.stop();
+                delay(500); // Give iOS time to notice the device disappeared
+                LOG_INFO("BitChat Bridge: Restarting advertising with BitChat service...");
+                nrf52Bluetooth->resumeAdvertising();
             } else {
                 LOG_ERROR("BitChat Bridge: BLE service setup failed");
                 bleEnabled = false;
@@ -221,6 +228,22 @@ void BitChatBridgeModule::queueMessageForProcessing(const BitChatMessage& msg, b
 void BitChatBridgeModule::processBitChatMessage(const BitChatMessage& msg, bool fromBLE)
 {
     logMessage(msg, fromBLE ? "BLE->Mesh" : "Mesh->BLE");
+    
+    // Sync time from BLE messages (they have accurate timestamps from phones)
+    if (fromBLE && !timeSynced) {
+        uint64_t msgTimestampMs = msg.timestamp;
+        uint64_t ourTimeMs = static_cast<uint64_t>(getTime()) * 1000ULL;
+        
+        // Only sync if the message timestamp looks reasonable (within 50 years of Unix epoch)
+        const uint64_t year2020Ms = 1577836800000ULL; // Jan 1, 2020 in ms
+        const uint64_t year2070Ms = 3155760000000ULL; // Jan 1, 2070 in ms
+        
+        if (msgTimestampMs >= year2020Ms && msgTimestampMs <= year2070Ms) {
+            timeOffsetMs = static_cast<int64_t>(msgTimestampMs) - static_cast<int64_t>(ourTimeMs);
+            timeSynced = true;
+            LOG_INFO("BitChat Bridge: Time synced from BLE peer (offset: %lld ms)", (long long)timeOffsetMs);
+        }
+    }
     
     // Handle fragments specially
     if (msg.type == BITCHAT_MSG_FRAGMENT) {
@@ -395,6 +418,28 @@ bool BitChatBridgeModule::shouldRelayMessage(const BitChatMessage& msg)
             // For now, allow them
             return true;
             
+        case BITCHAT_MSG_REQUEST_SYNC:
+            // Sync requests are local-only, don't relay to mesh
+            LOG_DEBUG("BitChat Bridge: Received sync request (local-only, not relaying)");
+            return false;
+            
+        case BITCHAT_MSG_NOISE_HANDSHAKE:
+        case BITCHAT_MSG_NOISE_ENCRYPTED:
+            // Noise protocol messages - allow for now
+            // TODO: Implement Noise protocol handling
+            LOG_DEBUG("BitChat Bridge: Noise protocol message (type 0x%02x)", msg.type);
+            return true;
+            
+        case BITCHAT_MSG_FRAGMENT_NEW:
+        case BITCHAT_MSG_FRAGMENT:
+            // Fragment messages - allow
+            return true;
+            
+        case BITCHAT_MSG_FILE_TRANSFER:
+            // File transfer messages - relay them
+            LOG_DEBUG("BitChat Bridge: File transfer message");
+            return true;
+            
         default:
             LOG_WARN("BitChat Bridge: Unknown message type 0x%02x", msg.type);
             return false;
@@ -426,6 +471,12 @@ void BitChatBridgeModule::logMessage(const BitChatMessage& msg, const char* acti
         case BITCHAT_MSG_CHANNEL: typeStr = "CHANNEL"; break;
         case BITCHAT_MSG_PING: typeStr = "PING"; break;
         case BITCHAT_MSG_PONG: typeStr = "PONG"; break;
+        case BITCHAT_MSG_NOISE_HANDSHAKE: typeStr = "NOISE_HANDSHAKE"; break;
+        case BITCHAT_MSG_NOISE_ENCRYPTED: typeStr = "NOISE_ENCRYPTED"; break;
+        case BITCHAT_MSG_FRAGMENT_NEW: typeStr = "FRAGMENT"; break;
+        case BITCHAT_MSG_REQUEST_SYNC: typeStr = "REQUEST_SYNC"; break;
+        case BITCHAT_MSG_FILE_TRANSFER: typeStr = "FILE_TRANSFER"; break;
+        case BITCHAT_MSG_FRAGMENT: typeStr = "FRAGMENT_LEGACY"; break;
     }
     
     LOG_DEBUG("BitChat Bridge: %s - Type: %s, Sender: 0x%08x, TTL: %d, Payload: %d bytes",
@@ -582,7 +633,19 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
     msg.type = BITCHAT_MSG_ANNOUNCE;
     msg.setSenderId32(myBitChatPeerId);
     // Timestamp in milliseconds since epoch (iOS format)
-    msg.timestamp = static_cast<uint64_t>(getTime()) * 1000ULL;
+    // Use synced time if available, otherwise use device time (will be rejected by iOS)
+    uint64_t deviceTimeMs = static_cast<uint64_t>(getTime()) * 1000ULL;
+    if (timeSynced) {
+        msg.timestamp = deviceTimeMs + static_cast<uint64_t>(timeOffsetMs);
+    } else {
+        msg.timestamp = deviceTimeMs;
+        // Log warning on first announcement before time sync
+        static bool warnedAboutTime = false;
+        if (!warnedAboutTime) {
+            LOG_WARN("BitChat Bridge: Sending announcement with unsynced time - may be rejected");
+            warnedAboutTime = true;
+        }
+    }
     msg.ttl = 7; // TTL=7 to match iOS messageTTLDefault (TransportConfig.messageTTLDefault)
     
     // Get device name

@@ -46,7 +46,12 @@ enum BitChatMessageType {
     BITCHAT_MSG_CHANNEL = 0x05,
     BITCHAT_MSG_PING = 0x06,
     BITCHAT_MSG_PONG = 0x07,
-    BITCHAT_MSG_FRAGMENT = 0xFF  // Special internal type for fragmented messages
+    BITCHAT_MSG_NOISE_HANDSHAKE = 0x10,
+    BITCHAT_MSG_NOISE_ENCRYPTED = 0x11,
+    BITCHAT_MSG_FRAGMENT_NEW = 0x20,  // New fragment protocol
+    BITCHAT_MSG_REQUEST_SYNC = 0x21,  // GCS filter-based sync request
+    BITCHAT_MSG_FILE_TRANSFER = 0x22,  // Binary file/audio/image payloads
+    BITCHAT_MSG_FRAGMENT = 0xFF  // Special internal type for fragmented messages (legacy)
 };
 
 // BLE Management Modes
@@ -276,6 +281,10 @@ private:
     uint32_t myBitChatPeerId = 0;      // Our BitChat peer ID (derived from Meshtastic node ID)
     uint32_t lastAnnounceTime = 0;     // Last time we sent an announcement
     static constexpr uint32_t ANNOUNCE_INTERVAL_MS = 30000; // Announce every 30 seconds
+    
+    // Time synchronization from BLE peers
+    int64_t timeOffsetMs = 0;          // Offset to add to getTime() to get real Unix time
+    bool timeSynced = false;           // Whether we've synced time from a BLE peer
     
     // Ed25519 signing keys for BitChat announcements
     // Using rweather/Crypto library: private key is 32 bytes, public key is 32 bytes

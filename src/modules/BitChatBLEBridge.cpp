@@ -276,15 +276,9 @@ bool BitChatBLEBridge::setupBitChatService()
     
     bitchatCharacteristic->setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_WRITE_WO_RESP | CHR_PROPS_NOTIFY);
     
-    if (config.bluetooth.mode != meshtastic_Config_BluetoothConfig_PairingMode_NO_PIN) {
-        bitchatService->setPermission(SECMODE_ENC_WITH_MITM, SECMODE_ENC_WITH_MITM);
-        bitchatCharacteristic->setPermission(SECMODE_ENC_NO_MITM, SECMODE_ENC_NO_MITM);
-        LOG_INFO("BitChat BLE: Using encrypted mode (service: ENC_WITH_MITM, char: ENC_NO_MITM) to match Meshtastic");
-    } else {
-        bitchatService->setPermission(SECMODE_OPEN, SECMODE_OPEN);
-        bitchatCharacteristic->setPermission(SECMODE_OPEN, SECMODE_OPEN);
-        LOG_INFO("BitChat BLE: Using open mode to match Meshtastic (NO_PIN)");
-    }
+    // No pin for BitChat connections needed
+    bitchatService->setPermission(SECMODE_OPEN, SECMODE_OPEN);
+    bitchatCharacteristic->setPermission(SECMODE_OPEN, SECMODE_OPEN);
     
     bitchatCharacteristic->setMaxLen(244);
     bitchatCharacteristic->setWriteCallback(bitchat_characteristic_write_callback);

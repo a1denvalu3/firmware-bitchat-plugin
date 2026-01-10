@@ -174,8 +174,29 @@ bool BitChatProtocolHandler::validateMessage(const BitChatMessage& msg)
         return false;
     }
     
-    // Check message type
-    if (msg.type < BITCHAT_MSG_ANNOUNCE || msg.type > BITCHAT_MSG_PONG) {
+    // Check message type - validate known types
+    bool validType = false;
+    switch (msg.type) {
+        case BITCHAT_MSG_ANNOUNCE:
+        case BITCHAT_MSG_MESSAGE:
+        case BITCHAT_MSG_LEAVE:
+        case BITCHAT_MSG_IDENTITY:
+        case BITCHAT_MSG_CHANNEL:
+        case BITCHAT_MSG_PING:
+        case BITCHAT_MSG_PONG:
+        case BITCHAT_MSG_NOISE_HANDSHAKE:
+        case BITCHAT_MSG_NOISE_ENCRYPTED:
+        case BITCHAT_MSG_FRAGMENT_NEW:
+        case BITCHAT_MSG_REQUEST_SYNC:
+        case BITCHAT_MSG_FILE_TRANSFER:
+        case BITCHAT_MSG_FRAGMENT:
+            validType = true;
+            break;
+        default:
+            LOG_WARN("BitChat: Invalid message type 0x%02x", msg.type);
+            return false;
+    }
+    if (!validType) {
         LOG_WARN("BitChat: Invalid message type 0x%02x", msg.type);
         return false;
     }
