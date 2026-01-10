@@ -104,13 +104,53 @@ void startAdv(void)
     // Bluefruit.ScanResponse.addService(meshBleService);
     Bluefruit.ScanResponse.addTxPower();
     
-    bool bitchatUuidAdded = Bluefruit.ScanResponse.addUuid(BLEUuid(BITCHAT_SERVICE_UUID_16));
-    LOG_INFO("Added BitChat UUID to scan response: %s", bitchatUuidAdded ? "SUCCESS" : "FAILED");
+    #if !MESHTASTIC_EXCLUDE_BITCHAT_BRIDGE
+    // For BitChat support, we need room in scan response for BitChat UUID (18 bytes)
+    // Temporarily use a shortened name to fit: TxPower(3) + ShortName(~8) + BitChatUUID(18) = ~29 bytes (fits in 31)
+    // Use LAST 8 characters to preserve the unique device ID (e.g., "ic_8848" from "Meshtastic_8848")
+    const char* fullName = getDeviceName();
+    size_t fullLen = strlen(fullName);
+    char shortName[9]; // 8 chars + null terminator
+    
+    if (fullLen <= 8) {
+        // Name is already short enough
+        strncpy(shortName, fullName, 8);
+    } else {
+        // Take last 8 characters (preserves unique ID)
+        strncpy(shortName, fullName + (fullLen - 8), 8);
+    }
+    shortName[8] = '\0';
+    
+    // Temporarily set short name for advertising
+    Bluefruit.setName(shortName);
+    LOG_INFO("Using shortened BLE name '%s' (full: '%s') to fit BitChat UUID", shortName, fullName);
+    #endif
     
     Bluefruit.ScanResponse.addName();
     // Include Name
     // Bluefruit.Advertising.addName();
+    
+    // Advertise Meshtastic service (primary)
     Bluefruit.Advertising.addService(meshBleService);
+    
+    // Add BitChat service UUID to scan response if BitChat module is enabled
+    #if !MESHTASTIC_EXCLUDE_BITCHAT_BRIDGE
+    // BitChat service is created by BitChatBLEBridge, we just advertise its UUID
+    LOG_INFO("Attempting to add BitChat UUID to scan response...");
+    bool bitchatAdded = Bluefruit.ScanResponse.addUuid(BLEUuid(BITCHAT_SERVICE_UUID_16));
+    if (bitchatAdded) {
+        LOG_INFO("SUCCESS: BitChat UUID added to scan response - both services discoverable");
+        // Restore full name after advertising is set up
+        Bluefruit.setName(fullName);
+        LOG_INFO("Restored full BLE name: '%s'", fullName);
+    } else {
+        LOG_WARN("FAILED: Could not add BitChat UUID to scan response even with short name");
+        // Restore full name anyway
+        Bluefruit.setName(fullName);
+    }
+    #else
+    LOG_INFO("BitChat module is excluded from build");
+    #endif
     
     /* Start Advertising
      * - Enable auto advertising if disconnected
@@ -240,8 +280,8 @@ int NRF52Bluetooth::getRssi()
 
 bool NRF52Bluetooth::isCentralRoleSupported()
 {
-    // Central role disabled for BitChat - peripheral-only mode
-    return false;
+    // nRF52 supports both central and peripheral roles
+    return true;
 }
 
 void NRF52Bluetooth::setup()
