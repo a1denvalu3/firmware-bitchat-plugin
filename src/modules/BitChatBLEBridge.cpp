@@ -27,9 +27,26 @@ public:
             activeBridge->onBitChatWrite(reinterpret_cast<const uint8_t*>(value.data()), value.length());
         }
     }
-    
+
     void onRead(NimBLECharacteristic* pCharacteristic) override {
-        LOG_DEBUG("BitChat BLE: Characteristic read");
+        LOG_INFO("BitChat BLE: Characteristic READ by client");
+        if (activeBridge) {
+            activeBridge->onBitChatConnect();
+        }
+    }
+    
+    void onSubscribe(NimBLECharacteristic* pCharacteristic, ble_gap_conn_desc* desc, uint16_t subValue) override {
+        if (subValue == 1) {
+            LOG_INFO("BitChat BLE: Client SUBSCRIBED to notifications");
+            if (activeBridge) {
+                activeBridge->onBitChatConnect();
+            }
+        } else if (subValue == 0) {
+            LOG_INFO("BitChat BLE: Client UNSUBSCRIBED from notifications");
+            if (activeBridge) {
+                activeBridge->onBitChatDisconnect();
+            }
+        }
     }
 };
 
@@ -39,12 +56,14 @@ public:
 class BitChatBLEServerCallbacks : public NimBLEServerCallbacks {
 public:
     void onConnect(NimBLEServer* pServer) override {
+        LOG_INFO("BitChat BLE: Client CONNECTED to BitChat service");
         if (activeBridge) {
             activeBridge->onBitChatConnect();
         }
     }
     
     void onDisconnect(NimBLEServer* pServer) override {
+        LOG_INFO("BitChat BLE: Client DISCONNECTED from BitChat service");
         if (activeBridge) {
             activeBridge->onBitChatDisconnect();
         }
@@ -206,7 +225,7 @@ bool BitChatBLEBridge::setupBitChatService(NimBLEServer* server)
     
     try {
         // Create BitChat service
-        bitchatService = server->createService(BITCHAT_SERVICE_UUID);
+        bitchatService = server->createService(NimBLEUUID(BITCHAT_SERVICE_UUID));
         if (!bitchatService) {
             LOG_ERROR("BitChat BLE: Failed to create BitChat service");
             return false;
@@ -214,8 +233,8 @@ bool BitChatBLEBridge::setupBitChatService(NimBLEServer* server)
         
         // Create BitChat characteristic
         bitchatCharacteristic = bitchatService->createCharacteristic(
-            BITCHAT_CHARACTERISTIC_UUID,
-            NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
+            NimBLEUUID(BITCHAT_CHARACTERISTIC_UUID),
+            NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::NOTIFY
         );
         
         if (!bitchatCharacteristic) {
@@ -223,12 +242,13 @@ bool BitChatBLEBridge::setupBitChatService(NimBLEServer* server)
             return false;
         }
         
+        // Set initial empty value
+        bitchatCharacteristic->setValue((uint8_t*)nullptr, 0);
+        LOG_DEBUG("BitChat BLE: Created characteristic with READ, WRITE, WRITE_NR, NOTIFY (OPEN permissions)");
+        
         // Set up callbacks
         if (!characteristicCallbacks) {
             characteristicCallbacks = new BitChatBLECharacteristicCallbacks();
-        }
-        if (!serverCallbacks) {
-            serverCallbacks = new BitChatBLEServerCallbacks();
         }
         
         bitchatCharacteristic->setCallbacks(characteristicCallbacks);
@@ -238,7 +258,7 @@ bool BitChatBLEBridge::setupBitChatService(NimBLEServer* server)
         bitchatService->start();
         serviceActive = true;
         
-        LOG_INFO("BitChat BLE: Service setup complete");
+        LOG_INFO("BitChat BLE: Service setup complete (characteristic callbacks registered)");
         return true;
         
     } catch (const std::exception& e) {
@@ -323,39 +343,12 @@ void BitChatBLEBridge::startAdvertising()
     }
     
 #ifdef ARCH_ESP32
-    try {
-        if (!bitchatService) {
-            LOG_WARN("BitChat BLE: Cannot advertise - service not initialized");
-            return;
-        }
-        
-        // Get the advertising instance
-        NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
-        if (!advertising) {
-            LOG_ERROR("BitChat BLE: No advertising instance available");
-            return;
-        }
-        
-        // Add BitChat service to advertising
-        advertising->addServiceUUID(BITCHAT_SERVICE_UUID);
-        advertising->setScanResponse(true);
-        
-        // Set advertising parameters for BitChat discovery
-        advertising->setMinInterval(160); // 100ms
-        advertising->setMaxInterval(320); // 200ms
-        
-        LOG_DEBUG("BitChat BLE: Starting ESP32 advertising");
-        advertising->start();
-        
-    } catch (const std::exception& e) {
-        LOG_ERROR("BitChat BLE: Exception during advertising start: %s", e.what());
-    }
+    LOG_DEBUG("BitChat BLE: Service registered");
     
 #elif defined(ARCH_NRF52)
     // On nRF52, we don't manage advertising directly
     // Our service is already added via bitchatService.begin()
     // Meshtastic's advertising will include all registered services
-    isAdvertising = true;
     LOG_DEBUG("BitChat BLE: Service registered, will be advertised with Meshtastic");
 #endif
 }
@@ -363,21 +356,11 @@ void BitChatBLEBridge::startAdvertising()
 void BitChatBLEBridge::stopAdvertising()
 {
 #ifdef ARCH_ESP32
-    try {
-        NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
-        if (advertising && advertising->isAdvertising()) {
-            // Remove BitChat service from advertising
-            advertising->removeServiceUUID(BITCHAT_SERVICE_UUID);
-            LOG_DEBUG("BitChat BLE: Stopped ESP32 advertising");
-        }
-    } catch (const std::exception& e) {
-        LOG_ERROR("BitChat BLE: Exception during advertising stop: %s", e.what());
-    }
+    LOG_DEBUG("BitChat BLE: Service remains advertised");
     
 #elif defined(ARCH_NRF52)
     // On nRF52, we don't stop Meshtastic's advertising
     // Both services remain advertised continuously
-    // isAdvertising just tracks that we've set up our service
     LOG_DEBUG("BitChat BLE: Service remains advertised with Meshtastic");
 #endif
 }
@@ -406,12 +389,12 @@ void BitChatBLEBridge::broadcastMessage(const BitChatMessage& msg)
             LOG_WARN("BitChat BLE: Cannot broadcast - characteristic not initialized");
             return;
         }
-        
-        // Set characteristic value and notify (Peripheral role - to connected centrals)
+                // Set characteristic value and notify (Peripheral role - to connected centrals)
+        // This ensures the announcement is available even if the client doesn't subscribe to notifications
         bitchatCharacteristic->setValue(buffer, messageSize);
         bitchatCharacteristic->notify();
         
-        LOG_DEBUG("BitChat BLE: ESP32 broadcasted message type=0x%02x, %d bytes", msg.type, messageSize);
+        LOG_DEBUG("BitChat BLE: ESP32 broadcasted message type=0x%02x, %d bytes (set value + notify)", msg.type, messageSize);
         
     } catch (const std::exception& e) {
         LOG_ERROR("BitChat BLE: Exception during message broadcast: %s", e.what());

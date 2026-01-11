@@ -11,6 +11,10 @@
 #include <NimBLEDevice.h>
 #include <mutex>
 
+#if !MESHTASTIC_EXCLUDE_BITCHAT_BRIDGE
+#include "modules/BitChatBridgeModule.h"
+#endif
+
 #ifdef NIMBLE_TWO
 #include "NimBLEAdvertising.h"
 #include "NimBLEExtAdvertising.h"
@@ -412,6 +416,10 @@ void NimbleBluetooth::startAdvertising()
     legacyScanResponse.setLegacyAdvertising(true);
     legacyScanResponse.setConnectable(true);
     legacyScanResponse.setName(getDeviceName());
+    
+    #if !MESHTASTIC_EXCLUDE_BITCHAT_BRIDGE
+    legacyScanResponse.addServiceUUID(NimBLEUUID(BITCHAT_SERVICE_UUID));
+    #endif
 
     if (!pAdvertising->setInstanceData(0, legacyAdvertising)) {
         LOG_ERROR("BLE failed to set legacyAdvertising");
@@ -422,10 +430,46 @@ void NimbleBluetooth::startAdvertising()
     }
 #else
     NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->reset();
-    pAdvertising->addServiceUUID(MESH_SERVICE_UUID);
+    pAdvertising->reset();    
+    pAdvertising->setScanResponse(true);    
+    pAdvertising->addServiceUUID(MESH_SERVICE_UUID);    
     pAdvertising->addServiceUUID(NimBLEUUID((uint16_t)0x180f)); // 0x180F is the Battery Service
-    pAdvertising->start(0);
+    LOG_DEBUG("NimBLE: Added Battery service UUID to advertising");
+    
+    // Add BitChat service UUID to SCAN RESPONSE if BitChat module is enabled
+    // This matches the nRF52 pattern where BitChat UUID goes in scan response
+    #if !MESHTASTIC_EXCLUDE_BITCHAT_BRIDGE
+    // For BitChat support, we need room in scan response for BitChat UUID
+    // Use shortened name (last 8 chars) to fit: Name(~8) + BitChatUUID(18) = ~26 bytes (fits in 31)
+    const char* fullName = getDeviceName();
+    size_t fullLen = strlen(fullName);
+    char shortName[9]; // 8 chars + null terminator
+    
+    if (fullLen <= 8) {
+        strncpy(shortName, fullName, 8);
+    } else {
+        // Take last 8 characters (preserves unique device ID, e.g., "tic_17b8" from "Meshtastic_17b8")
+        strncpy(shortName, fullName + (fullLen - 8), 8);
+    }
+    shortName[8] = '\0';
+    
+    // Create scan response data with BitChat UUID and shortened device name
+    NimBLEAdvertisementData scanResponse;
+    scanResponse.setName(shortName);
+    scanResponse.setCompleteServices(NimBLEUUID(BITCHAT_SERVICE_UUID));
+    pAdvertising->setScanResponseData(scanResponse);
+    LOG_INFO("NimBLE: Added BitChat UUID to scan response with shortened name '%s' (full: '%s')", shortName, fullName);
+    #endif
+    
+    // Try to start advertising
+    LOG_INFO("NimBLE: Starting BLE advertising (Meshtastic + Battery in adv, BitChat in scan response)");
+    
+    bool started = pAdvertising->start(0);
+    if (started) {
+        LOG_INFO("NimBLE: BLE advertising started successfully");
+    } else {
+        LOG_ERROR("NimBLE: BLE advertising FAILED to start!");
+    }
 #endif
 }
 

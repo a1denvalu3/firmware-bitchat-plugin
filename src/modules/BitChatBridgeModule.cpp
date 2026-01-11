@@ -112,6 +112,14 @@ int32_t BitChatBridgeModule::runOnce()
             if (bleBridge.setupBitChatService(bleServer)) {
                 LOG_INFO("BitChat Bridge: BLE service setup successful (ESP32)");
                 bleServiceSetup = true;
+                
+                LOG_INFO("BitChat Bridge: Creating initial announcement for BLE characteristic...");
+                sendPeerAnnouncement();  // This will create and broadcast the announcement immediately
+                
+                // Don't restart advertising - the service is already registered with GATT
+                // and the BitChat UUID is already in the scan response from initial advertising
+                // NimBLE will automatically include all started services in GATT table
+                LOG_INFO("BitChat Bridge: BitChat service available in GATT table");
             } else {
                 LOG_ERROR("BitChat Bridge: BLE service setup failed");
                 bleEnabled = false;
@@ -145,26 +153,10 @@ int32_t BitChatBridgeModule::runOnce()
 #endif
     }
     
-    // Update BLE time manager (only used for ESP32)
-    #ifdef ARCH_ESP32
-    if (bleEnabled && bleServiceSetup) {
-        bleTimeManager.update();
-        
-        // Handle BLE advertising based on time manager state
-        if (bleTimeManager.canUseBLEForBitChat()) {
-            if (!bleBridge.getIsAdvertising()) {
-                // Start advertising during BitChat windows
-                bleBridge.startAdvertising();
-            }
-        } else {
-            if (bleBridge.getIsAdvertising()) {
-                // Stop advertising when not in BitChat window
-                bleBridge.stopAdvertising();
-            }
-        }
-    }
-    #endif
-    // On nRF52, both services are always advertised together, no windows needed
+    // On both ESP32 and nRF52, advertising is handled by the core Bluetooth stack
+    // (NimbleBluetooth for ESP32, NRF52Bluetooth for nRF52)
+    // BitChat UUID is added during core advertising setup, so no plugin-level management needed
+    // Both services remain advertised continuously
 #endif
     
     // Send periodic peer announcements (act as a BitChat peer)
@@ -312,19 +304,9 @@ void BitChatBridgeModule::broadcastToBLE(const BitChatMessage& msg)
         return;
     }
     
-    // On ESP32, check time windows. On nRF52, both services are always active
-    #ifdef ARCH_ESP32
-    // Check if BLE is available for BitChat
-    if (!bleTimeManager.canUseBLEForBitChat()) {
-        LOG_DEBUG("BitChat Bridge: BLE not available for BitChat at this time");
-        return;
-    }
-    
-    // Request a session if not already active
-    if (bleTimeManager.getCurrentMode() != BLE_MODE_BITCHAT_ACTIVE) {
-        bleTimeManager.requestBitChatSession();
-    }
-    #endif
+    // On ESP32, both services are now advertised continuously (no time windows)
+    // On nRF52, both services are always active
+    // No time window checks needed - advertising is always on
     
     // Broadcast the message
     bleBridge.broadcastMessage(msg);

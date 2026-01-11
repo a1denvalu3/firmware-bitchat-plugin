@@ -202,7 +202,6 @@ private:
     size_t getPeripheralNotificationLimit();
 #endif
     bool serviceActive = false;
-    bool isAdvertising = false;
     
     // BLE write reassembly buffer (for handling MTU-limited writes from peripheral role)
     // Buffer must accommodate: header(13) + sender(8) + recipient(8) + payload(245) + signature(64) = 338 bytes
@@ -222,7 +221,6 @@ public:
     void stopAdvertising();
     void broadcastMessage(const BitChatMessage& msg);
     bool isServiceActive() const { return serviceActive; }
-    bool getIsAdvertising() const { return isAdvertising; }
     // Set bridge module reference for callbacks
     void setBridgeModule(class BitChatBridgeModule* module) { bridgeModule = module; }
     
