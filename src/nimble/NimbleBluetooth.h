@@ -12,16 +12,12 @@ class NimbleBluetooth : BluetoothApi
     bool isConnected();
     int getRssi();
     void sendLog(const uint8_t *logMessage, size_t length);
-#if defined(NIMBLE_TWO)
-    void startAdvertising();
-#endif
+    void startAdvertising(); // Public so callback can restart advertising on disconnect
+    void ensureAdvertising(); // Ensure advertising is active when not connected (called periodically)
     bool isDeInit = false;
 
   private:
     void setupService();
-#if !defined(NIMBLE_TWO)
-    void startAdvertising();
-#endif
 };
 
 void setBluetoothEnable(bool enable);
