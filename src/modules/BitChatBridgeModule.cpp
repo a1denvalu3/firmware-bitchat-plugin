@@ -719,6 +719,7 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
                 for (int b = 7; b >= 0; b--) {
                     msg.payload[offset++] = (id >> (b * 8)) & 0xFF;
                 }
+                LOG_DEBUG("BitChat Bridge: Announcement includes neighbor ID 0x%08x", (uint32_t)id);
             }
             LOG_DEBUG("BitChat Bridge: Added %d neighbors to announcement", neighborCount);
         } else {
