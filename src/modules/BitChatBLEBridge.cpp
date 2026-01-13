@@ -476,7 +476,8 @@ void BitChatBLEBridge::onBitChatWrite(const uint8_t* data, size_t length)
         
         // Forward to bridge module for processing
         if (bitchatBridgeModule) {
-            bitchatBridgeModule->processBitChatMessage(msg, true); // fromBLE = true
+            // Queue for processing in main thread to avoid stack overflow in BLE callback
+            bitchatBridgeModule->queueMessageForProcessing(msg, true);
         }
         return;
     }
@@ -556,7 +557,8 @@ void BitChatBLEBridge::onBitChatConnect()
 {
     // Send an immediate announcement via Peripheral notify when Android/iOS connects
     if (bridgeModule) {
-        bridgeModule->sendPeerAnnouncement();
+        // Request announcement from main thread to avoid stack overflow in BLE callback
+        bridgeModule->requestPeerAnnouncement();
     }
 }
 

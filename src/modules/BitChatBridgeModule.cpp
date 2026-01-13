@@ -163,6 +163,14 @@ int32_t BitChatBridgeModule::runOnce()
     #if !MESHTASTIC_EXCLUDE_BLUETOOTH
     if (bleEnabled && bleServiceSetup) {
         uint32_t currentTime = millis();
+        
+        // Check for requested announcement (from BLE connection)
+        if (shouldSendAnnouncement) {
+            sendPeerAnnouncement();
+            shouldSendAnnouncement = false;
+            lastAnnounceTime = currentTime; // Reset periodic timer
+        }
+        
         if (currentTime - lastAnnounceTime >= ANNOUNCE_INTERVAL_MS) {
             sendPeerAnnouncement();
             lastAnnounceTime = currentTime;
@@ -585,6 +593,16 @@ bool BitChatBridgeModule::handleFragment(const BitChatMessage& fragment)
     
     // Add to reassembly buffer
     return fragmentBuffer.addFragment(fragment, fragmentId, index, total, originalSize);
+}
+
+/**
+ * Request a peer announcement to be sent from the main loop
+ * Safe to call from BLE callbacks (avoids stack overflow)
+ */
+void BitChatBridgeModule::requestPeerAnnouncement()
+{
+    shouldSendAnnouncement = true;
+    setIntervalFromNow(0); // Wake up runOnce immediately
 }
 
 /**

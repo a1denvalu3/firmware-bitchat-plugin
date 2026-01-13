@@ -309,7 +309,8 @@ private:
     volatile size_t messageQueueHead = 0;  // Index of next message to process
     volatile size_t messageQueueTail = 0;  // Index of next free slot
     volatile size_t messageQueueCount = 0; // Number of messages in queue
-    
+    volatile bool shouldSendAnnouncement = false; // Flag to trigger announcement from main loop
+
 public:
     /** Constructor */
     BitChatBridgeModule();
@@ -350,6 +351,7 @@ public:
     
     // Peer announcement (public so BLE bridge can call on connection)
     void sendPeerAnnouncement();
+    void requestPeerAnnouncement();
     
 private:
     // Internal helpers
