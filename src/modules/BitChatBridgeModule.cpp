@@ -700,6 +700,32 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
     memcpy(&msg.payload[offset], ed25519PublicKey, 32);
     offset += 32;
     
+    // TLV 4: Direct Neighbors (0x04 + Len + Count + IDs)
+    // Get neighbors from TopologyManager
+    uint64_t neighborIds[16]; // Max 16 neighbors to fit in payload
+    uint8_t neighborCount = topologyManager.getDirectNeighborIds(neighborIds, 16);
+    
+    if (neighborCount > 0) {
+        // Check if we have space: 2 bytes (Type+Len) + 1 byte (Count) + 8*count
+        size_t required = 3 + (neighborCount * 8);
+        if (offset + required <= BITCHAT_MAX_PAYLOAD_SIZE) {
+            msg.payload[offset++] = 0x04; // Type: neighbors
+            msg.payload[offset++] = 1 + (neighborCount * 8); // Length: Count byte + IDs
+            msg.payload[offset++] = neighborCount;
+            
+            for (uint8_t i = 0; i < neighborCount; i++) {
+                uint64_t id = neighborIds[i];
+                // Serialize 8-byte ID (Big Endian to match protocol)
+                for (int b = 7; b >= 0; b--) {
+                    msg.payload[offset++] = (id >> (b * 8)) & 0xFF;
+                }
+            }
+            LOG_DEBUG("BitChat Bridge: Added %d neighbors to announcement", neighborCount);
+        } else {
+            LOG_WARN("BitChat Bridge: Not enough space for neighbor list (%d bytes required)", required);
+        }
+    }
+    
     msg.payloadLength = offset;
     
     LOG_DEBUG("BitChat Bridge: Created announcement with TLV payload (%d bytes)", offset);
