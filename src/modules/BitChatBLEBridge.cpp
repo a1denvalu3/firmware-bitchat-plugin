@@ -499,7 +499,12 @@ void BitChatBLEBridge::onBitChatWrite(const uint8_t* data, size_t length, uint16
     }
     
     // Try to parse directly first
-    LOG_DEBUG("BitChat BLE: Received data %d bytes from handle %d", length, connHandle);
+    LOG_INFO("BitChat BLE: Received data %d bytes from handle %d", length, connHandle);
+    if (length >= 16) {
+        LOG_INFO("Raw Header: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+                 data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+                 data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]);
+    }
     BitChatMessage msg;
     if (BitChatProtocolHandler::parseMessage(data, length, msg)) {
         // Success! Complete message received in one write
