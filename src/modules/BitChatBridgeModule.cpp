@@ -163,10 +163,7 @@ int32_t BitChatBridgeModule::runOnce()
     #if !MESHTASTIC_EXCLUDE_BLUETOOTH
     if (bleEnabled && bleServiceSetup) {
         uint32_t currentTime = millis();
-        uint32_t announceInterval = bleBridge.isServiceActive() 
-                                    ? 5000  // 5 seconds when connected
-                                    : ANNOUNCE_INTERVAL_MS;  // 30 seconds when not connected
-        if (currentTime - lastAnnounceTime >= announceInterval) {
+        if (currentTime - lastAnnounceTime >= ANNOUNCE_INTERVAL_MS) {
             sendPeerAnnouncement();
             lastAnnounceTime = currentTime;
         }
@@ -217,7 +214,7 @@ void BitChatBridgeModule::queueMessageForProcessing(const BitChatMessage& msg, b
     messageQueueCount++;
 }
 
-void BitChatBridgeModule::processBitChatMessage(const BitChatMessage& msg, bool fromBLE)
+void BitChatBridgeModule::processBitChatMessage(BitChatMessage& msg, bool fromBLE)
 {
     logMessage(msg, fromBLE ? "BLE->Mesh" : "Mesh->BLE");
     
@@ -291,8 +288,12 @@ void BitChatBridgeModule::processBitChatMessage(const BitChatMessage& msg, bool 
     if (fromBLE) {
         relayToMesh(msg);
     } else {
-        broadcastToBLE(msg);
         messagesBridged++;
+    }
+
+    if (msg.ttl > 1) {
+        msg.decrementTtl();
+        broadcastToBLE(msg);
     }
 }
 

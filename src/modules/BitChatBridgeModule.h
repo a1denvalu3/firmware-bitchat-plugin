@@ -98,6 +98,12 @@ struct BitChatMessage {
             senderId[i] = static_cast<uint8_t>((id >> (i * 8)) & 0xFF);
         }
     }
+
+    void decrementTtl() {
+        if (this->ttl > 1) {
+            this->ttl--;
+        }
+    }
     
     // Constructor
     BitChatMessage() : version(BITCHAT_VERSION), type(0), ttl(0), timestamp(0), flags(0), payloadLength(0) {
@@ -323,7 +329,7 @@ protected:
     
 public:
     // BitChat message handling
-    void processBitChatMessage(const BitChatMessage& msg, bool fromBLE = false);
+    void processBitChatMessage(BitChatMessage& msg, bool fromBLE = false);
     void queueMessageForProcessing(const BitChatMessage& msg, bool fromBLE); // Queue message for deferred processing
     void broadcastToBLE(const BitChatMessage& msg);
     void relayToMesh(const BitChatMessage& msg);
