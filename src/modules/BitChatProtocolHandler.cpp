@@ -76,12 +76,12 @@ bool BitChatProtocolHandler::parseMessage(const uint8_t* data, size_t length, Bi
     }
     
     // Sender ID
-    msg.senderId = *reinterpret_cast<const uint64_t*>(data + offset);
+    memcpy(&msg.senderId, data + offset, sizeof(msg.senderId));
     offset += sizeof(msg.senderId);
     
     // Recipient ID
     if (hasRecipient) {
-        msg.recipientId = *reinterpret_cast<const uint64_t*>(data + offset);
+        memcpy(&msg.recipientId, data + offset, sizeof(msg.recipientId));
         offset += sizeof(msg.recipientId);
     } else {
         msg.recipientId = 0;

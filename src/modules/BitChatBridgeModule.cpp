@@ -648,7 +648,8 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
     BitChatMessage msg;
     
     msg.type = BITCHAT_MSG_ANNOUNCE;
-    msg.senderId = static_cast<uint64_t>(myBitChatPeerId);
+    msg.senderId = static_cast<uint64_t>(myBitChatPeerId) << 32;
+
     // Timestamp in milliseconds since epoch (iOS format)
     // Use synced time if available, otherwise use device time (will be rejected by iOS)
     uint64_t deviceTimeMs = static_cast<uint64_t>(getTime()) * 1000ULL;
@@ -714,7 +715,7 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
             
             for (uint8_t i = 0; i < neighborCount; i++) {
                 uint64_t id = neighborIds[i];
-                memcpy(msg.payload + offset, &id, 8);
+                memcpy(msg.payload + offset, &id, sizeof(id));
                 offset += 8;
                 LOG_DEBUG("BitChat Bridge: Announcement includes neighbor ID 0x%08x", (uint64_t)id);
             }
