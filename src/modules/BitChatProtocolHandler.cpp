@@ -1,5 +1,6 @@
 #include "BitChatBridgeModule.h"
 #include "configuration.h"
+#include "meshUtils.h"
 #include "mesh/MeshService.h"
 #include "mesh/Router.h"
 #include "NodeDB.h"
@@ -76,12 +77,12 @@ bool BitChatProtocolHandler::parseMessage(const uint8_t* data, size_t length, Bi
     
     // Sender ID
     msg.senderId = *reinterpret_cast<const uint64_t*>(data + offset);
-    offset += 8;
+    offset += sizeof(msg.senderId);
     
     // Recipient ID
     if (hasRecipient) {
         msg.recipientId = *reinterpret_cast<const uint64_t*>(data + offset);
-        offset += 8;
+        offset += sizeof(msg.recipientId);
     } else {
         msg.recipientId = 0;
     }
@@ -192,12 +193,12 @@ size_t BitChatProtocolHandler::serializeMessage(const BitChatMessage& msg, uint8
     }
     
     // Sender ID
-    memcpy(buffer + offset, &msg.senderId, 8);
+    memcpy(buffer + offset, &msg.senderId, sizeof(msg.senderId));
     offset += 8;
     
     // Recipient ID
     if (hasRecipient) {
-        memcpy(buffer + offset, &msg.recipientId, 8);
+        memcpy(buffer + offset, &msg.recipientId, sizeof(msg.recipientId));
         offset += 8;
     }
     
@@ -225,6 +226,7 @@ size_t BitChatProtocolHandler::serializeMessage(const BitChatMessage& msg, uint8
     }
     
     LOG_DEBUG("BitChat: Serialized V%d msg %d bytes (route=%d)", msg.version, offset, msg.routeCount);
+    printBytes("BitChat Outgoing", buffer, offset);
     return offset;
 }
 

@@ -710,8 +710,7 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
         size_t required = 3 + (neighborCount * 8);
         if (offset + required <= BITCHAT_MAX_PAYLOAD_SIZE) {
             msg.payload[offset++] = 0x04; // Type: neighbors
-            msg.payload[offset++] = 1 + (neighborCount * 8); // Length: Count byte + IDs
-            msg.payload[offset++] = neighborCount;
+            msg.payload[offset++] = neighborCount * 8; // Length: IDs only
             
             for (uint8_t i = 0; i < neighborCount; i++) {
                 uint64_t id = neighborIds[i];
