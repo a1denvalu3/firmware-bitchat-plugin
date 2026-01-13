@@ -188,12 +188,15 @@ int32_t BitChatBridgeModule::runOnce()
         QueuedMessage queued = messageQueue[messageQueueHead];
         messageQueueHead = (messageQueueHead + 1) % MAX_QUEUE_SIZE;
         messageQueueCount--;
-        processBitChatMessage(queued.msg, queued.fromBLE);
+        processBitChatMessage(queued.msg, queued.fromBLE, queued.bleConnHandle);
         processed++;
     }
     
     // Update statistics and cleanup
     updateStatistics();
+    
+    // Clean up stale topology entries
+    topologyManager.cleanup(millis());
     
     // If we have queued messages, run more frequently to process them quickly
     // Otherwise, run every 5 seconds during normal operation
@@ -203,7 +206,7 @@ int32_t BitChatBridgeModule::runOnce()
     return 5000;
 }
 
-void BitChatBridgeModule::queueMessageForProcessing(const BitChatMessage& msg, bool fromBLE)
+void BitChatBridgeModule::queueMessageForProcessing(const BitChatMessage& msg, bool fromBLE, uint16_t bleConnHandle)
 {
     // Queue message for deferred processing in main loop
     // This prevents stack overflow when called from BLE callbacks
@@ -218,13 +221,26 @@ void BitChatBridgeModule::queueMessageForProcessing(const BitChatMessage& msg, b
     // Add new message
     messageQueue[messageQueueTail].msg = msg;
     messageQueue[messageQueueTail].fromBLE = fromBLE;
+    messageQueue[messageQueueTail].bleConnHandle = bleConnHandle;
     messageQueueTail = (messageQueueTail + 1) % MAX_QUEUE_SIZE;
     messageQueueCount++;
 }
 
-void BitChatBridgeModule::processBitChatMessage(BitChatMessage& msg, bool fromBLE)
+void BitChatBridgeModule::processBitChatMessage(BitChatMessage& msg, bool fromBLE, uint16_t bleConnHandle)
 {
     logMessage(msg, fromBLE ? "BLE->Mesh" : "Mesh->BLE");
+    
+    // Update topology if it's a direct ANNOUNCE from BLE
+    if (fromBLE && msg.type == BITCHAT_MSG_ANNOUNCE) {
+        // TTL=7 implies direct neighbor (0 hops)
+        if (msg.ttl == 7) {
+            uint32_t senderId = msg.getSenderId32();
+            if (bleConnHandle != 0xFFFF) {
+                topologyManager.updateNeighbor(senderId, bleConnHandle, true);
+                LOG_INFO("BitChat Bridge: Registered direct neighbor 0x%08x (handle=%d)", senderId, bleConnHandle);
+            }
+        }
+    }
     
     // Sync time from BLE messages (they have accurate timestamps from phones)
     if (fromBLE && !timeSynced) {
