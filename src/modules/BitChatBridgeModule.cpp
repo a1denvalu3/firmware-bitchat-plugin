@@ -237,7 +237,7 @@ void BitChatBridgeModule::processBitChatMessage(BitChatMessage& msg, bool fromBL
             uint64_t senderId = msg.senderId;
             if (bleConnHandle != 0xFFFF) {
                 topologyManager.updateNeighbor(senderId, bleConnHandle, true);
-                LOG_INFO("BitChat Bridge: Registered direct neighbor 0x%08x (handle=%d)", senderId, bleConnHandle);
+                LOG_INFO("BitChat Bridge: Registered direct neighbor 0x%08x (handle=%hd)", senderId, bleConnHandle);
             }
         }
     }
@@ -487,7 +487,7 @@ void BitChatBridgeModule::logMessage(const BitChatMessage& msg, const char* acti
     }
     
     LOG_DEBUG("BitChat Bridge: %s - Type: %s, Sender: 0x%08x, TTL: %d, Payload: %d bytes",
-              action, typeStr, msg.senderId, msg.ttl, msg.payloadLength);
+              action, typeStr, (uint32_t)msg.senderId, msg.ttl, msg.payloadLength);
 }
 
 bool BitChatBridgeModule::handleConfigMessage(const meshtastic_AdminMessage* request, meshtastic_AdminMessage* response)
@@ -715,11 +715,9 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
             
             for (uint8_t i = 0; i < neighborCount; i++) {
                 uint64_t id = neighborIds[i];
-                // Serialize 8-byte ID (Big Endian to match protocol)
-                for (int b = 7; b >= 0; b--) {
-                    msg.payload[offset++] = (id >> (b * 8)) & 0xFF;
-                }
-                LOG_DEBUG("BitChat Bridge: Announcement includes neighbor ID 0x%08x", (uint32_t)id);
+                memcpy(msg.payload + offset, &id, 8);
+                offset += 8;
+                LOG_DEBUG("BitChat Bridge: Announcement includes neighbor ID 0x%08x", (uint64_t)id);
             }
             LOG_DEBUG("BitChat Bridge: Added %d neighbors to announcement", neighborCount);
         } else {
