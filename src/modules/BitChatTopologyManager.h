@@ -19,11 +19,11 @@ public:
     };
 
 private:
-    std::map<uint32_t, NeighborInfo> neighbors; // PeerID -> Info
+    std::map<uint64_t, NeighborInfo> neighbors; // PeerID -> Info
     static constexpr uint32_t NEIGHBOR_TIMEOUT_MS = 60000; // 1 minute timeout
 
 public:
-    void updateNeighbor(uint32_t peerId, uint16_t connHandle, bool isDirect);
+    void updateNeighbor(uint64_t peerId, uint16_t connHandle, bool isDirect);
     bool getNeighbor(uint32_t peerId, NeighborInfo& info);
     void removeNeighbor(uint32_t peerId);
     void cleanup(uint32_t currentTime);

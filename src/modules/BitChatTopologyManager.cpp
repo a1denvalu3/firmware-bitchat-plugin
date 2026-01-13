@@ -1,7 +1,7 @@
 #include "BitChatTopologyManager.h"
 #include "configuration.h" // For millis() usually, or Arduino.h
 
-void BitChatTopologyManager::updateNeighbor(uint32_t peerId, uint16_t connHandle, bool isDirect) {
+void BitChatTopologyManager::updateNeighbor(uint64_t peerId, uint16_t connHandle, bool isDirect) {
     uint32_t currentTime = millis();
     neighbors[peerId] = NeighborInfo(connHandle, currentTime, isDirect);
 }

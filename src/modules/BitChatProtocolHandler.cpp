@@ -75,15 +75,15 @@ bool BitChatProtocolHandler::parseMessage(const uint8_t* data, size_t length, Bi
     }
     
     // Sender ID
-    memcpy(msg.senderId, data + offset, 8);
+    msg.senderId = *reinterpret_cast<const uint64_t*>(data + offset);
     offset += 8;
     
     // Recipient ID
     if (hasRecipient) {
-        memcpy(msg.recipientId, data + offset, 8);
+        msg.recipientId = *reinterpret_cast<const uint64_t*>(data + offset);
         offset += 8;
     } else {
-        memset(msg.recipientId, 0, 8);
+        msg.recipientId = 0;
     }
     
     // Source Route (V2 only)
@@ -192,12 +192,12 @@ size_t BitChatProtocolHandler::serializeMessage(const BitChatMessage& msg, uint8
     }
     
     // Sender ID
-    memcpy(buffer + offset, msg.senderId, 8);
+    memcpy(buffer + offset, &msg.senderId, 8);
     offset += 8;
     
     // Recipient ID
     if (hasRecipient) {
-        memcpy(buffer + offset, msg.recipientId, 8);
+        memcpy(buffer + offset, &msg.recipientId, 8);
         offset += 8;
     }
     
@@ -394,7 +394,7 @@ bool BitChatProtocolHandler::extractBitChatMessage(const meshtastic_MeshPacket& 
     }
     
     LOG_DEBUG("BitChat: Extracted message type=0x%02x, sender=0x%08x, ttl=%d, payload=%d bytes",
-              bitchatMsg.type, bitchatMsg.getSenderId32(), bitchatMsg.ttl, bitchatMsg.payloadLength);
+              bitchatMsg.type, bitchatMsg.senderId, bitchatMsg.ttl, bitchatMsg.payloadLength);
     
     return true;
 }

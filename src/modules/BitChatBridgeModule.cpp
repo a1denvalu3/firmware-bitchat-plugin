@@ -234,7 +234,7 @@ void BitChatBridgeModule::processBitChatMessage(BitChatMessage& msg, bool fromBL
     if (fromBLE && msg.type == BITCHAT_MSG_ANNOUNCE) {
         // TTL=7 implies direct neighbor (0 hops)
         if (msg.ttl == 7) {
-            uint32_t senderId = msg.getSenderId32();
+            uint64_t senderId = msg.senderId;
             if (bleConnHandle != 0xFFFF) {
                 topologyManager.updateNeighbor(senderId, bleConnHandle, true);
                 LOG_INFO("BitChat Bridge: Registered direct neighbor 0x%08x (handle=%d)", senderId, bleConnHandle);
@@ -487,7 +487,7 @@ void BitChatBridgeModule::logMessage(const BitChatMessage& msg, const char* acti
     }
     
     LOG_DEBUG("BitChat Bridge: %s - Type: %s, Sender: 0x%08x, TTL: %d, Payload: %d bytes",
-              action, typeStr, msg.getSenderId32(), msg.ttl, msg.payloadLength);
+              action, typeStr, msg.senderId, msg.ttl, msg.payloadLength);
 }
 
 bool BitChatBridgeModule::handleConfigMessage(const meshtastic_AdminMessage* request, meshtastic_AdminMessage* response)
@@ -533,7 +533,7 @@ std::vector<BitChatMessage> BitChatBridgeModule::fragmentMessage(const BitChatMe
     for (uint8_t i = 0; i < totalFragments; i++) {
         BitChatMessage fragment;
         fragment.type = BITCHAT_MSG_FRAGMENT;
-        fragment.setSenderId32(msg.getSenderId32());
+        fragment.senderId = msg.senderId;
         fragment.timestamp = msg.timestamp;
         fragment.ttl = msg.ttl;
         
@@ -648,7 +648,7 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
     BitChatMessage msg;
     
     msg.type = BITCHAT_MSG_ANNOUNCE;
-    msg.setSenderId32(myBitChatPeerId);
+    msg.senderId = static_cast<uint64_t>(myBitChatPeerId);
     // Timestamp in milliseconds since epoch (iOS format)
     // Use synced time if available, otherwise use device time (will be rejected by iOS)
     uint64_t deviceTimeMs = static_cast<uint64_t>(getTime()) * 1000ULL;

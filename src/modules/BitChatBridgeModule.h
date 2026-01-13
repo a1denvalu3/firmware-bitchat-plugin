@@ -84,8 +84,8 @@ struct BitChatMessage {
     uint64_t timestamp;     // Unix timestamp (8 bytes, milliseconds since epoch)
     uint8_t flags;          // Flags
     uint32_t payloadLength; // Length of payload (4 bytes in V2)
-    uint8_t senderId[8];    // Sender ID (8 bytes, padded)
-    uint8_t recipientId[8]; // Recipient ID (8 bytes, optional, based on flags)
+    uint64_t senderId;    // Sender ID (8 bytes, padded)
+    uint64_t recipientId; // Recipient ID (8 bytes, optional, based on flags)
     
     // Source Routing (V2)
     uint8_t routeCount;
@@ -94,21 +94,13 @@ struct BitChatMessage {
     uint8_t payload[BITCHAT_MAX_PAYLOAD_SIZE]; // Message payload
     uint8_t signature[BITCHAT_SIGNATURE_SIZE]; // Ed25519 signature
     
-    // Helper to get senderId as uint32_t (for backward compatibility)
-    uint32_t getSenderId32() const {
-        uint32_t id = 0;
-        for (int i = 0; i < 4; i++) {
-            id |= (static_cast<uint32_t>(senderId[i]) << (i * 8));
-        }
-        return id;
+    uint64_t getSenderId() const {
+        return this->senderId;
     }
     
     // Helper to set senderId from uint32_t
-    void setSenderId32(uint32_t id) {
-        memset(senderId, 0, 8);
-        for (int i = 0; i < 4; i++) {
-            senderId[i] = static_cast<uint8_t>((id >> (i * 8)) & 0xFF);
-        }
+    void setSenderId(uint64_t id) {
+        this->senderId = id;
     }
 
     void decrementTtl() {
@@ -119,8 +111,8 @@ struct BitChatMessage {
     
     // Constructor
     BitChatMessage() : version(BITCHAT_CURRENT_VERSION), type(0), ttl(0), timestamp(0), flags(0), payloadLength(0), routeCount(0) {
-        memset(senderId, 0, sizeof(senderId));
-        memset(recipientId, 0, sizeof(recipientId));
+        senderId = 0;
+        recipientId = 0;
         memset(route, 0, sizeof(route));
         memset(payload, 0, sizeof(payload));
         memset(signature, 0, sizeof(signature));
