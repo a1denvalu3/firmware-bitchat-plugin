@@ -634,6 +634,9 @@ void BitChatBridgeModule::sendPeerAnnouncement()
     // Broadcast via BLE - broadcastMessage() now handles both Peripheral and Central roles
     // This matches iOS sendOnAllLinks() behavior - sends on all available BLE links
     broadcastToBLE(announcement);
+
+    announcement.ttl++;
+    relayToMesh(announcement);
 }
 
 /**
