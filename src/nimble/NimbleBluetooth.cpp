@@ -497,20 +497,19 @@ void NimbleBluetooth::startAdvertising()
     #if !MESHTASTIC_EXCLUDE_BITCHAT_BRIDGE
     // For BitChat support, we need room in scan response for BitChat UUID (18 bytes)
     // Temporarily use a shortened name to fit: ShortName(~8) + BitChatUUID(18) = ~26 bytes (fits in 31)
-    // Use LAST 8 characters to preserve the unique device ID (e.g., "tic_17b8" from "Meshtastic_17b8")
+    // Truncate prefix to 3 characters and preserve device ID (e.g., "Mes_17b8" from "Meshtastic_17b8")
+    const size_t bleShortNameLen = 8;
     const char* fullName = getDeviceName();
     size_t fullLen = strlen(fullName);
-    char shortName[9]; // 8 chars + null terminator
-    
-    if (fullLen <= 8) {
-        strncpy(shortName, fullName, 8);
+    char shortName[bleShortNameLen + 1];
+
+    if (fullLen <= bleShortNameLen) {
+        strncpy(shortName, fullName, bleShortNameLen);
         shortName[fullLen] = '\0';
-        LOG_DEBUG("NimBLE: Name is already short (%d chars), using as-is", fullLen);
     } else {
-        // Take last 8 characters (preserves unique ID)
-        strncpy(shortName, fullName + (fullLen - 8), 8);
-        shortName[8] = '\0';
-        LOG_DEBUG("NimBLE: Shortened name from %d to 8 characters", fullLen);
+        strncpy(shortName, fullName, 3);
+        strncpy(shortName + 3, fullName + (fullLen - 5), 5);
+        shortName[bleShortNameLen] = '\0';
     }
     LOG_INFO("NimBLE: Using shortened BLE name '%s' (full: '%s') to fit BitChat UUID", shortName, fullName);
     #else
