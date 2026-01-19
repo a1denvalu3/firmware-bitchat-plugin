@@ -163,15 +163,10 @@ int32_t BitChatBridgeModule::runOnce()
     #if !MESHTASTIC_EXCLUDE_BLUETOOTH
     if (bleEnabled && bleServiceSetup) {
         uint32_t currentTime = millis();
-        
-        // Check for requested announcement (from BLE connection)
-        if (shouldSendAnnouncement) {
-            sendPeerAnnouncement();
-            shouldSendAnnouncement = false;
-            lastAnnounceTime = currentTime; // Reset periodic timer
-        }
-        
-        if (currentTime - lastAnnounceTime >= ANNOUNCE_INTERVAL_MS) {
+        uint32_t announceInterval = bleBridge.isServiceActive() 
+                                    ? 5000  // 5 seconds when connected
+                                    : ANNOUNCE_INTERVAL_MS;  // 30 seconds when not connected
+        if (currentTime - lastAnnounceTime >= announceInterval) {
             sendPeerAnnouncement();
             lastAnnounceTime = currentTime;
         }
@@ -188,15 +183,12 @@ int32_t BitChatBridgeModule::runOnce()
         QueuedMessage queued = messageQueue[messageQueueHead];
         messageQueueHead = (messageQueueHead + 1) % MAX_QUEUE_SIZE;
         messageQueueCount--;
-        processBitChatMessage(queued.msg, queued.fromBLE, queued.bleConnHandle);
+        processBitChatMessage(queued.msg, queued.fromBLE);
         processed++;
     }
     
     // Update statistics and cleanup
     updateStatistics();
-    
-    // Clean up stale topology entries
-    topologyManager.cleanup(millis());
     
     // If we have queued messages, run more frequently to process them quickly
     // Otherwise, run every 5 seconds during normal operation
@@ -206,7 +198,7 @@ int32_t BitChatBridgeModule::runOnce()
     return 5000;
 }
 
-void BitChatBridgeModule::queueMessageForProcessing(const BitChatMessage& msg, bool fromBLE, uint16_t bleConnHandle)
+void BitChatBridgeModule::queueMessageForProcessing(const BitChatMessage& msg, bool fromBLE)
 {
     // Queue message for deferred processing in main loop
     // This prevents stack overflow when called from BLE callbacks
@@ -221,26 +213,13 @@ void BitChatBridgeModule::queueMessageForProcessing(const BitChatMessage& msg, b
     // Add new message
     messageQueue[messageQueueTail].msg = msg;
     messageQueue[messageQueueTail].fromBLE = fromBLE;
-    messageQueue[messageQueueTail].bleConnHandle = bleConnHandle;
     messageQueueTail = (messageQueueTail + 1) % MAX_QUEUE_SIZE;
     messageQueueCount++;
 }
 
-void BitChatBridgeModule::processBitChatMessage(BitChatMessage& msg, bool fromBLE, uint16_t bleConnHandle)
+void BitChatBridgeModule::processBitChatMessage(const BitChatMessage& msg, bool fromBLE)
 {
     logMessage(msg, fromBLE ? "BLE->Mesh" : "Mesh->BLE");
-    
-    // Update topology if it's a direct ANNOUNCE from BLE
-    if (fromBLE && msg.type == BITCHAT_MSG_ANNOUNCE) {
-        // TTL=7 implies direct neighbor (0 hops)
-        if (msg.ttl == 7) {
-            uint64_t senderId = msg.senderId;
-            if (bleConnHandle != 0xFFFF) {
-                topologyManager.updateNeighbor(senderId, bleConnHandle, true);
-                LOG_INFO("BitChat Bridge: Registered direct neighbor 0x%08x (handle=%hd)", senderId, bleConnHandle);
-            }
-        }
-    }
     
     // Sync time from BLE messages (they have accurate timestamps from phones)
     if (fromBLE && !timeSynced) {
@@ -312,12 +291,8 @@ void BitChatBridgeModule::processBitChatMessage(BitChatMessage& msg, bool fromBL
     if (fromBLE) {
         relayToMesh(msg);
     } else {
-        messagesBridged++;
-    }
-
-    if (msg.ttl > 1) {
-        msg.decrementTtl();
         broadcastToBLE(msg);
+        messagesBridged++;
     }
 }
 
@@ -487,7 +462,7 @@ void BitChatBridgeModule::logMessage(const BitChatMessage& msg, const char* acti
     }
     
     LOG_DEBUG("BitChat Bridge: %s - Type: %s, Sender: 0x%08x, TTL: %d, Payload: %d bytes",
-              action, typeStr, (uint32_t)msg.senderId, msg.ttl, msg.payloadLength);
+              action, typeStr, msg.getSenderId32(), msg.ttl, msg.payloadLength);
 }
 
 bool BitChatBridgeModule::handleConfigMessage(const meshtastic_AdminMessage* request, meshtastic_AdminMessage* response)
@@ -533,7 +508,7 @@ std::vector<BitChatMessage> BitChatBridgeModule::fragmentMessage(const BitChatMe
     for (uint8_t i = 0; i < totalFragments; i++) {
         BitChatMessage fragment;
         fragment.type = BITCHAT_MSG_FRAGMENT;
-        fragment.senderId = msg.senderId;
+        fragment.setSenderId32(msg.getSenderId32());
         fragment.timestamp = msg.timestamp;
         fragment.ttl = msg.ttl;
         
@@ -612,16 +587,6 @@ bool BitChatBridgeModule::handleFragment(const BitChatMessage& fragment)
 }
 
 /**
- * Request a peer announcement to be sent from the main loop
- * Safe to call from BLE callbacks (avoids stack overflow)
- */
-void BitChatBridgeModule::requestPeerAnnouncement()
-{
-    shouldSendAnnouncement = true;
-    setIntervalFromNow(0); // Wake up runOnce immediately
-}
-
-/**
  * Send peer announcement - makes Meshtastic appear as a BitChat peer
  */
 void BitChatBridgeModule::sendPeerAnnouncement()
@@ -634,9 +599,6 @@ void BitChatBridgeModule::sendPeerAnnouncement()
     // Broadcast via BLE - broadcastMessage() now handles both Peripheral and Central roles
     // This matches iOS sendOnAllLinks() behavior - sends on all available BLE links
     broadcastToBLE(announcement);
-
-    announcement.ttl++;
-    relayToMesh(announcement);
 }
 
 /**
@@ -651,8 +613,7 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
     BitChatMessage msg;
     
     msg.type = BITCHAT_MSG_ANNOUNCE;
-    msg.senderId = static_cast<uint64_t>(myBitChatPeerId) << 32;
-
+    msg.setSenderId32(myBitChatPeerId);
     // Timestamp in milliseconds since epoch (iOS format)
     // Use synced time if available, otherwise use device time (will be rejected by iOS)
     uint64_t deviceTimeMs = static_cast<uint64_t>(getTime()) * 1000ULL;
@@ -703,30 +664,6 @@ BitChatMessage BitChatBridgeModule::createPeerAnnouncement()
     msg.payload[offset++] = 32;   // Length: 32 bytes
     memcpy(&msg.payload[offset], ed25519PublicKey, 32);
     offset += 32;
-    
-    // TLV 4: Direct Neighbors (0x04 + Len + Count + IDs)
-    // Get neighbors from TopologyManager
-    uint64_t neighborIds[16]; // Max 16 neighbors to fit in payload
-    uint8_t neighborCount = topologyManager.getDirectNeighborIds(neighborIds, 16);
-    
-    if (neighborCount > 0) {
-        // Check if we have space: 2 bytes (Type+Len) + 1 byte (Count) + 8*count
-        size_t required = 3 + (neighborCount * 8);
-        if (offset + required <= BITCHAT_MAX_PAYLOAD_SIZE) {
-            msg.payload[offset++] = 0x04; // Type: neighbors
-            msg.payload[offset++] = neighborCount * 8; // Length: IDs only
-            
-            for (uint8_t i = 0; i < neighborCount; i++) {
-                uint64_t id = neighborIds[i];
-                memcpy(msg.payload + offset, &id, sizeof(id));
-                offset += 8;
-                LOG_DEBUG("BitChat Bridge: Announcement includes neighbor ID 0x%08x", (uint64_t)id);
-            }
-            LOG_DEBUG("BitChat Bridge: Added %d neighbors to announcement", neighborCount);
-        } else {
-            LOG_WARN("BitChat Bridge: Not enough space for neighbor list (%d bytes required)", required);
-        }
-    }
     
     msg.payloadLength = offset;
     

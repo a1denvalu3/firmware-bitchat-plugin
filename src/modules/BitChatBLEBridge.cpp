@@ -21,24 +21,12 @@ static BitChatBLEBridge* activeBridge = nullptr;
  */
 class BitChatBLECharacteristicCallbacks : public NimBLECharacteristicCallbacks {
 public:
-#ifdef NIMBLE_TWO
-    void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-        if (activeBridge) {
-            auto value = pCharacteristic->getValue();
-            activeBridge->onBitChatWrite(reinterpret_cast<const uint8_t*>(value.data()), value.length(), connInfo.getConnHandle());
-        }
-    }
-#else
     void onWrite(NimBLECharacteristic* pCharacteristic) override {
         if (activeBridge) {
             auto value = pCharacteristic->getValue();
-            // On older NimBLE, connection handle isn't provided directly in onWrite.
-            // Workaround: Use the tracked handle if there is exactly one connection.
-            uint16_t handle = activeBridge->getSingleConnectionHandle();
-            activeBridge->onBitChatWrite(reinterpret_cast<const uint8_t*>(value.data()), value.length(), handle);
+            activeBridge->onBitChatWrite(reinterpret_cast<const uint8_t*>(value.data()), value.length());
         }
     }
-#endif
 
     void onRead(NimBLECharacteristic* pCharacteristic) override {
         LOG_INFO("BitChat BLE: Characteristic READ by client");
@@ -49,17 +37,13 @@ public:
     
     void onSubscribe(NimBLECharacteristic* pCharacteristic, ble_gap_conn_desc* desc, uint16_t subValue) override {
         if (subValue == 1) {
-            LOG_INFO("BitChat BLE: Client SUBSCRIBED to notifications (handle=%d)", desc->conn_handle);
+            LOG_INFO("BitChat BLE: Client SUBSCRIBED to notifications");
             if (activeBridge) {
-                // Track this connection
-                activeBridge->addConnection(desc->conn_handle);
                 activeBridge->onBitChatConnect();
             }
         } else if (subValue == 0) {
-            LOG_INFO("BitChat BLE: Client UNSUBSCRIBED from notifications (handle=%d)", desc->conn_handle);
+            LOG_INFO("BitChat BLE: Client UNSUBSCRIBED from notifications");
             if (activeBridge) {
-                // Remove tracked connection
-                activeBridge->removeConnection(desc->conn_handle);
                 activeBridge->onBitChatDisconnect();
             }
         }
@@ -81,10 +65,6 @@ public:
     void onDisconnect(NimBLEServer* pServer) override {
         LOG_INFO("BitChat BLE: Client DISCONNECTED from BitChat service");
         if (activeBridge) {
-            // Check connected count to clean up
-            if (pServer->getConnectedCount() == 0) {
-                activeBridge->clearConnections();
-            }
             activeBridge->onBitChatDisconnect();
         }
     }
@@ -109,7 +89,7 @@ static BitChatBLEBridge* activeBridge = nullptr;
 void bitchat_characteristic_write_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len)
 {
     if (activeBridge) {
-        activeBridge->onBitChatWrite(data, len, conn_hdl);
+        activeBridge->onBitChatWrite(data, len);
     }
 }
 
@@ -387,23 +367,17 @@ void BitChatBLEBridge::stopAdvertising()
 
 void BitChatBLEBridge::broadcastMessage(const BitChatMessage& msg)
 {
-    // Broadcast sends to ALL connected devices (no handle filtering)
-    unicastMessage(0xFFFF, msg);
-}
-
-void BitChatBLEBridge::unicastMessage(uint16_t connHandle, const BitChatMessage& msg)
-{
     if (!serviceActive) {
-        LOG_WARN("BitChat BLE: Cannot send - service not active");
+        LOG_WARN("BitChat BLE: Cannot broadcast - service not active");
         return;
     }
     
     // Serialize BitChat message once
-    uint8_t buffer[BITCHAT_MAX_MESSAGE_SIZE];
+    uint8_t buffer[BITCHAT_HEADER_SIZE + BITCHAT_MAX_PAYLOAD_SIZE];
     size_t messageSize = BitChatProtocolHandler::serializeMessage(msg, buffer, sizeof(buffer));
     
     if (messageSize == 0) {
-        LOG_ERROR("BitChat BLE: Failed to serialize message for send");
+        LOG_ERROR("BitChat BLE: Failed to serialize message for broadcast");
         return;
     }
     
@@ -412,72 +386,61 @@ void BitChatBLEBridge::unicastMessage(uint16_t connHandle, const BitChatMessage&
     
     try {
         if (!bitchatCharacteristic) {
-            LOG_WARN("BitChat BLE: Cannot send - characteristic not initialized");
+            LOG_WARN("BitChat BLE: Cannot broadcast - characteristic not initialized");
             return;
         }
-        
-        // Set characteristic value (for Read requests)
+                // Set characteristic value and notify (Peripheral role - to connected centrals)
+        // This ensures the announcement is available even if the client doesn't subscribe to notifications
         bitchatCharacteristic->setValue(buffer, messageSize);
+        bitchatCharacteristic->notify();
         
-        // Send Notification
-        if (connHandle == 0xFFFF) {
-            // Broadcast to all subscribed clients
-            bitchatCharacteristic->notify();
-            LOG_DEBUG("BitChat BLE: ESP32 broadcasted message type=0x%02x, %d bytes", msg.type, messageSize);
-        } else {
-            // Unicast to specific connection
-#ifdef NIMBLE_TWO
-            bitchatCharacteristic->notify(buffer, messageSize, true, connHandle);
-            LOG_DEBUG("BitChat BLE: ESP32 unicast to handle %d, %d bytes", connHandle, messageSize);
-#else
-            // Old API doesn't support targeted notify easily?
-            // Fallback to broadcast or check if we can filter
-            // NimBLECharacteristic::notify() usually sends to all subscribed.
-            // If we can't target, we must broadcast.
-            bitchatCharacteristic->notify(); 
-            LOG_WARN("BitChat BLE: ESP32 unicast fallback to broadcast (old API)");
-#endif
-        }
+        LOG_DEBUG("BitChat BLE: ESP32 broadcasted message type=0x%02x, %d bytes (set value + notify)", msg.type, messageSize);
         
     } catch (const std::exception& e) {
-        LOG_ERROR("BitChat BLE: Exception during message send: %s", e.what());
+        LOG_ERROR("BitChat BLE: Exception during message broadcast: %s", e.what());
     }
     
 #elif defined(ARCH_NRF52)
+    // Broadcast on ALL links (like iOS and Android do):
+    // 1. Peripheral role: notify subscribed centrals (devices connected to us)
+    // 2. Central role: write to connected peripherals (devices we're connected to)
+    
+    // 1. Send via Peripheral role (notify subscribed centrals)
     if (!bitchatCharacteristic) {
-        LOG_WARN("BitChat BLE: Cannot send - characteristic not initialized");
+        LOG_WARN("BitChat BLE: Cannot broadcast - characteristic not initialized");
         return;
     }
 
-    // BLE notifications are limited by MTU
+    // BLE notifications are limited by MTU (MTU - 3 bytes for ATT header)
     size_t peripheralLimit = getPeripheralNotificationLimit();
     
     if (messageSize > peripheralLimit) {
+        // Message is too large for a single notification
+        // Skip notification and send via Central write instead
+        // Android should buffer Central writes, allowing large messages to be received
         LOG_WARN("BitChat BLE: Message %d bytes > %zu (peripheral MTU payload limit), skipping notify",
                  messageSize, peripheralLimit);
-        // We can't send this large message via notify.
-        // Android/iOS might read it if we set value, but notify is how push works.
-        // Fragmentation should have handled this?
-        // No, BitChat fragmentation is for Mesh. BLE MTU is separate.
-        // But we can't easily fragment at BLE level without a protocol.
-        // We just drop/warn for now if it exceeds MTU.
+        LOG_WARN("BitChat BLE: Android should receive this via Central write (if connected)");
+        // Don't send via notify - let Central write handle it below
     } else {
+        // Message fits in single notification - send directly
         bitchatCharacteristic->write(buffer, messageSize);
-        
-        if (connHandle == 0xFFFF) {
-            // Broadcast
-            bool notifyResult = bitchatCharacteristic->notify(buffer, messageSize);
-            LOG_DEBUG("BitChat BLE: nRF52 broadcast result=%d", notifyResult);
+        bool notifyResult = bitchatCharacteristic->notify(buffer, messageSize);
+        if (notifyResult) {
+            LOG_DEBUG("BitChat BLE: Sent via Peripheral notify, %d bytes", messageSize);
         } else {
-            // Unicast using notify(conn_hdl, ...)
-            bool notifyResult = bitchatCharacteristic->notify(connHandle, buffer, messageSize);
-            LOG_DEBUG("BitChat BLE: nRF52 unicast to %d result=%d", connHandle, notifyResult);
+            LOG_DEBUG("BitChat BLE: notify() returned false (client may not have enabled notifications yet), %d bytes", messageSize);
         }
     }
+    
+#endif
+
+#ifdef ARCH_NRF52
+    LOG_DEBUG("BitChat BLE: nRF52 broadcasted message type=0x%02x, %d bytes", msg.type, messageSize);
 #endif
 }
 
-void BitChatBLEBridge::onBitChatWrite(const uint8_t* data, size_t length, uint16_t connHandle)
+void BitChatBLEBridge::onBitChatWrite(const uint8_t* data, size_t length)
 {
     uint32_t currentTime = millis();
     
@@ -488,10 +451,9 @@ void BitChatBLEBridge::onBitChatWrite(const uint8_t* data, size_t length, uint16
     }
     
     // Check if this looks like the START of a new message (has valid header)
-    // We check V1 (13) and V2 (16) minimums.
-    size_t minHeader = BITCHAT_HEADER_SIZE_V1;
-    
-    if (length >= minHeader && writeBufferOffset > 0) {
+    // If the incoming data has a valid BitChat header (length >= 12 bytes),
+    // and we already have buffered data, this is a NEW message
+    if (length >= BITCHAT_HEADER_SIZE && writeBufferOffset > 0) {
         // This looks like a new message header while we have buffered data
         // Discard the old buffer and start fresh with this new message
         LOG_WARN("BitChat BLE: New message header detected, discarding %d buffered bytes", writeBufferOffset);
@@ -499,12 +461,7 @@ void BitChatBLEBridge::onBitChatWrite(const uint8_t* data, size_t length, uint16
     }
     
     // Try to parse directly first
-    LOG_INFO("BitChat BLE: Received data %d bytes from handle %d", length, connHandle);
-    if (length >= 16) {
-        LOG_INFO("Raw Header: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-                 data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-                 data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]);
-    }
+    LOG_DEBUG("BitChat BLE: Received data %d bytes", length);
     BitChatMessage msg;
     if (BitChatProtocolHandler::parseMessage(data, length, msg)) {
         // Success! Complete message received in one write
@@ -513,13 +470,13 @@ void BitChatBLEBridge::onBitChatWrite(const uint8_t* data, size_t length, uint16
         // Validate message
         if (!BitChatProtocolHandler::validateMessage(msg)) {
             LOG_WARN("BitChat BLE: Invalid message received via BLE (type=0x%02x)", msg.type);
+            // Message was parsed but invalid - just drop it
             return;
         }
         
         // Forward to bridge module for processing
         if (bitchatBridgeModule) {
-            // Queue for processing in main thread
-            bitchatBridgeModule->queueMessageForProcessing(msg, true, connHandle);
+            bitchatBridgeModule->processBitChatMessage(msg, true); // fromBLE = true
         }
         return;
     }
@@ -529,11 +486,13 @@ void BitChatBLEBridge::onBitChatWrite(const uint8_t* data, size_t length, uint16
     
     // Check if adding this would overflow
     if (writeBufferOffset + length > sizeof(writeBuffer)) {
-        LOG_ERROR("BitChat BLE: Buffer would overflow (%d + %d > %d), discarding buffer",
+        LOG_ERROR("BitChat BLE: Buffer would overflow (%d + %d > %d), discarding buffer and starting fresh",
                   writeBufferOffset, length, sizeof(writeBuffer));
         writeBufferOffset = 0;
         
+        // If this single write is too large, just drop it
         if (length > sizeof(writeBuffer)) {
+            LOG_ERROR("BitChat BLE: Single write too large (%d bytes), dropping", length);
             return;
         }
     }
@@ -548,26 +507,41 @@ void BitChatBLEBridge::onBitChatWrite(const uint8_t* data, size_t length, uint16
         // Success!
         LOG_INFO("BitChat BLE: Reassembled message from %d bytes", writeBufferOffset);
         
-        // Calculate message size
-        // We can't rely on fixed calculation since header is variable.
-        // But parseMessage succeeded, so we know it's valid.
-        // We should clear the buffer.
+        // Calculate actual message size for buffer cleanup
+        bool hasRecipient = (msg.flags & BITCHAT_FLAG_HAS_RECIPIENT) != 0;
+        bool hasSignature = (msg.flags & BITCHAT_FLAG_HAS_SIGNATURE) != 0;
+        size_t messageSize = BITCHAT_HEADER_SIZE + 8 + (hasRecipient ? 8 : 0) + msg.payloadLength + (hasSignature ? BITCHAT_SIGNATURE_SIZE : 0);
         
         // Validate message
         if (!BitChatProtocolHandler::validateMessage(msg)) {
             LOG_WARN("BitChat BLE: Invalid message received via BLE (type=0x%02x)", msg.type);
-            // Reset buffer
-            writeBufferOffset = 0;
+            // Skip past this invalid message if there's more data
+            if (messageSize < writeBufferOffset) {
+                size_t remainingBytes = writeBufferOffset - messageSize;
+                memmove(writeBuffer, writeBuffer + messageSize, remainingBytes);
+                writeBufferOffset = remainingBytes;
+                LOG_DEBUG("BitChat BLE: Skipped invalid message, %d bytes remaining", writeBufferOffset);
+                // Try parsing again
+                if (BitChatProtocolHandler::parseMessage(writeBuffer, writeBufferOffset, msg)) {
+                    if (BitChatProtocolHandler::validateMessage(msg) && bitchatBridgeModule) {
+                        bitchatBridgeModule->queueMessageForProcessing(msg, true);
+                    }
+                    writeBufferOffset = 0;
+                }
+            } else {
+                writeBufferOffset = 0;
+            }
             return;
         }
         
         writeBufferOffset = 0;
         
+        // Queue message for deferred processing in main loop (avoid stack overflow in callback)
         if (bitchatBridgeModule) {
-            bitchatBridgeModule->queueMessageForProcessing(msg, true, connHandle);
+            bitchatBridgeModule->queueMessageForProcessing(msg, true); // fromBLE = true
         }
     } else {
-        // Still incomplete
+        // Still incomplete, wait for more data
         LOG_DEBUG("BitChat BLE: Waiting for more data (buffered %d bytes)", writeBufferOffset);
     }
 }
@@ -582,8 +556,7 @@ void BitChatBLEBridge::onBitChatConnect()
 {
     // Send an immediate announcement via Peripheral notify when Android/iOS connects
     if (bridgeModule) {
-        // Request announcement from main thread to avoid stack overflow in BLE callback
-        bridgeModule->requestPeerAnnouncement();
+        bridgeModule->sendPeerAnnouncement();
     }
 }
 
