@@ -125,7 +125,7 @@ struct BitChatMessage {
 class BitChatDuplicateCache {
 private:
     struct CacheEntry {
-        uint32_t senderId;
+        uint64_t senderId;
         uint32_t timestamp;
         uint8_t messageType;
         uint32_t hash;
